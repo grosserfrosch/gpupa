@@ -1,0 +1,568 @@
+﻿#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+#include <stdio.h>
+#include "kernel.cuh"
+#include <cmath>
+#include <vector>
+
+const float __constant__ epsilon = 0.0001;
+
+bool __host__ __device__ equ(float a, float b)
+{
+    return (a <= b + epsilon) && (a >= b - epsilon);
+}
+bool __host__ __device__ les_equ(float a, float b)
+{
+    return (a <= b + epsilon);
+}
+bool __host__ __device__ gre_equ(float a, float b)
+{
+    return (a >= b - epsilon);
+}
+
+
+__host__ __device__ vect3::vect3(float x_, float y_, float z_) : x(x_), y(y_), z(z_) 
+{
+    len = sqrt(x * x + y * y + z * z);
+}
+__host__ __device__ vect3::vect3(float val) : vect3(val, val, val) {}
+__host__ __device__ vect3::vect3() : vect3(0, 0, 0) {}
+
+__host__ __device__ vect3 vect3::operator + (vect3 v)
+{
+    vect3 vec{ x + v.x, y + v.y, z + v.z };
+    return vec;
+}
+__host__ __device__ vect3 vect3::operator - (vect3 v)
+{
+    vect3 vec{ x - v.x, y - v.y, z - v.z };
+    return vec;
+}
+__host__ __device__ vect3 vect3::operator * (float val)
+{
+    vect3 vec{ x * val, y * val, z * val };
+    return vec;
+}
+__host__ __device__ vect3 vect3::operator / (float val)
+{
+    vect3 vec{ x / val, y / val, z / val };
+    return vec;
+}
+
+__host__ __device__ float vect3::operator * (vect3 v)
+{
+    return x*v.x + y*v.y + z*v.z;
+}
+__host__ __device__ vect3 vect3::operator ^ (vect3 v)
+{
+    vect3 vec{ y * v.z - z * v.y, z * v.x - x * v.z, x * v.y - y * v.x };
+    return vec;
+}
+
+__host__ __device__ bool vect3::operator == (vect3 v)
+{
+    return equ(x, v.x) && equ(y, v.y) && equ(z, v.z);
+}
+
+__host__ __device__ vect3 norm(vect3 vec) 
+{
+    if (equ(vec.len, 0))
+        return vect3{0, 0, 0};
+
+    return vec / vec.len;
+}
+
+__host__ __device__ line3::line3(vect3 p1_, vect3 p2_) : p1(p1_), p2(p2_) {}
+__host__ __device__ line3::line3(vect3* p1_, vect3* p2_) : p1(*p1_), p2(*p2_) {}
+__host__ __device__ line3::line3() : line3{ {0, 0, 0}, {1, 1, 1} } {}
+
+__host__ __device__ bool line3::contains(vect3 point)
+{
+    auto dx = point.x - p1.x,
+        dy = point.y - p1.y,
+        dz = point.z - p1.z;
+
+    vect3 v = p1 - p2;
+
+    float ch_x = 0, ch_y = 0, ch_z = 0;
+    bool a_x_zero = false, a_y_zero = false, a_z_zero = false;
+
+    if (equ(v.x, 0))
+        if (!equ(dx, 0))
+            return false;
+        else
+            a_x_zero = true;
+    else
+        ch_x = dx / v.x;
+
+    if (equ(v.y, 0))
+        if (!equ(dy, 0))
+            return false;
+        else
+            a_y_zero = true;
+    else
+        ch_y = dy / v.y;
+
+    if (equ(v.z, 0))
+        if (!equ(dz, 0))
+            return false;
+        else
+            a_z_zero = true;
+    else
+        ch_z = dz / v.z;
+
+    if (equ(ch_x, ch_y) && equ(ch_y, ch_z))
+        return true;
+
+    if (a_x_zero)
+    {
+        if (equ(ch_y, ch_x))
+            return true;
+        else if (equ(ch_y, ch_z))
+            return true;
+        else
+            return false;
+    }
+    else if (a_y_zero)
+    {
+        if (equ(ch_y, ch_z))
+            return true;
+        else if (equ(ch_x, ch_z))
+            return true;
+        else
+            return false;
+    }
+    else if (a_z_zero)
+    {
+        if (equ(ch_x, ch_y))
+            return true;
+        else
+            return false;
+    }
+    return false;
+
+}
+
+__host__ __device__ bool line3::is_correct()
+{
+    return !(p1 == p2);
+}
+
+
+__host__ __device__ plane::plane(vect3 p1, vect3 p2, vect3 p3) 
+{
+    vect3 v1 = p2 - p1, v2 = p3 - p1;
+
+    if ((line3{ p1, p2 }).contains(p3))
+    {
+        A = 0; 
+        B = 0;
+        C = 0;
+        D = 0;
+    }
+
+    vect3 e1 = norm(v1);
+    vect3 e2 = norm(v2);
+
+    vect3 q1 = p1;
+    vect3 q2 = p1 + e1;
+    vect3 q3 = p1 + e2;
+
+    A = (q2.y - q1.y) * (q3.z - q1.z) - (q3.y - q1.y) * (q2.z - q1.z);
+    B = -(q2.x - q1.x) * (q3.z - q1.z) + (q3.x - q1.x) * (q2.z - q1.z);
+    C = (q2.x - q1.x) * (q3.y - q1.y) - (q3.x - q1.x) * (q2.y - q1.y);
+    D = -A * q1.x - B * q1.y - C * q1.z;
+    normale = norm(vect3{ A, B, C });
+}
+__host__ __device__ plane::plane(float a, float b, float c, float d) : A(a), B(b), C(c), D(d), normale{ norm(vect3{A, B, C}) } {}
+__host__ __device__ plane::plane() : plane{ 0, 0, 0, 0 } {}
+
+__host__ __device__ bool plane::is_correct()
+{
+    return !(equ(A, 0) && equ(B, 0) && equ(C, 0) && equ(D, 0));
+}
+
+__host__ __device__ float plane::value(vect3 p)
+{
+    return A * p.x + B * p.y + C * p.z + D;
+}
+__host__ __device__ float plane::value(vect3 *p)
+{
+    return A * p->x + B * p->y + C * p->z + D;
+}
+__host__ __device__ bool plane::contains(vect3 p)
+{
+    auto ans = A * p.x + B * p.y + C * p.z + D;
+    return equ(ans, 0);
+}
+__host__ __device__ bool plane::contains(vect3* p)
+{
+    auto ans = A * p->x + B * p->y + C * p->z + D;
+    return equ(ans, 0);
+}
+__host__ __device__ bool plane::intersects(line3 l, vect3* p)
+{
+    if (equ(vect3{ A, B, C } * (l.p2 - l.p1), 0))
+        return false;
+
+    vect3 v = l.p2 - l.p1;
+    float px = (l.p1).x, py = l.p1.y, pz = l.p1.z;
+    float vx = v.x, vy = v.y, vz = v.z;
+    auto t0 = -(A * px + B * py + C * pz + D);
+
+    t0 /= A * vx + B * vy + C * vz;
+
+    *p = vect3{ px + t0 * vx, py + t0 * vy, pz + t0 * vz };
+    return true;
+
+}
+__host__ __device__ bool plane::posit_intersects(line3 l, vect3* p)
+{
+    if (equ(this->get_normale() * (l.p2 - l.p1), 0))
+        return false;
+
+    vect3 v = l.p2 - l.p1;
+    float px = (l.p1).x, py = l.p1.y, pz = l.p1.z;
+    float vx = v.x, vy = v.y, vz = v.z;
+    float t0 = -(A * px + B * py + C * pz + D);
+
+    t0 /= A * vx + B * vy + C * vz;
+    if (t0 <= 0)
+        return false;
+    *p = vect3{ px + t0 * vx, py + t0 * vy, pz + t0 * vz };
+    return true;
+
+}
+__host__ __device__ bool plane::intersects(line3* l, vect3* p)
+{
+    if (equ(vect3{ A, B, C } *(l->p2 - l->p1), 0))
+        return false;
+
+    vect3 v = l->p2 - l->p1;
+    float px = (l->p1).x, py = l->p1.y, pz = l->p1.z;
+    float vx = v.x, vy = v.y, vz = v.z;
+    auto t0 = -(A * px + B * py + C * pz + D);
+
+    t0 /= A * vx + B * vy + C * vz;
+
+    *p = vect3{ px + t0 * vx, py + t0 * vy, pz + t0 * vz };
+    return true;
+}
+__host__ __device__ bool plane::posit_intersects(line3* l, vect3* p)
+{
+    vect3 v = l->p2 - l->p1;
+    if (equ(vect3{ A, B, C } * v, 0))
+        return false;
+
+    
+    auto t0 = -(A * (l->p1).x + B * l->p1.y + C * l->p1.z + D);
+
+    t0 /= A * v.x + B * v.y + C * v.z;
+    if (t0 <= 0)
+        return false;
+    *p = vect3{ (l->p1).x + t0 * v.x, l->p1.y + t0 * v.y, l->p1.z + t0 * v.z };
+    return true;
+}
+__host__ __device__ vect3 plane::get_normale()
+{
+    if (normale == vect3{ 0, 0, 0 })
+        normale = norm(vect3{ A, B, C });
+    return normale;
+}
+
+__host__ __device__ sphere::sphere(vect3 p_, float r_, vect3 col) : p(p_), r(r_), color(col) {}
+__host__ __device__ sphere::sphere() : sphere{ {0, 0, 0}, 1, {255, 255, 255} } {}
+
+__host__ __device__ bool sphere::contains(vect3 q)
+{
+    return equ((q - p) * (q - p) - r * r, 0);
+}
+__host__ __device__ bool sphere::intersects(line3 l, vect3* q)
+{
+    vect3 vec = l.p2 - l.p1;
+
+    float a = vec*vec;
+    float b = 2 * (l.p1 * vec - p * vec);
+    float c = (l.p1 * l.p1) - r * r - 2 * (p * l.p1) + (p * p);
+
+    if (b * b < 4 * a * c)
+    {
+        *q = vect3{ 0, 0, 0 };
+        return false;
+    }
+
+    float d_sqrt = sqrt(b * b - 4 * a * c);
+    float t1 = (-b + d_sqrt) / (2 * a), t2 = (-b - d_sqrt) / (2 * a);
+
+    //vect3 a1 = { l.p1.x + t1 * vec.x, l.p1.y + t1 * vec[1], point[2] + t1 * vec[2] };
+    //vect3 a2 = { point[0] + t2 * vec[0], point[1] + t2 * vec[1], point[2] + t2 * vec[2] };
+
+    vect3 a1 = l.p1 + (vec * t1);
+    vect3 a2 = l.p1 + (vec * t2);
+
+    if ((a1 - l.p1).len < (a2 - l.p1).len)
+    {
+        *q = a1;
+    }
+    else
+    {
+        *q = a2;
+    }
+    return true;
+}
+
+__host__ __device__ polygon::polygon(vect3 p1_, vect3 p2_, vect3 p3_, vect3 col) : pl(plane{ p1_, p2_, p3_ }), p1(p1_), p2(p2_), p3(p3_), color(col) {}
+__host__ __device__ polygon::polygon() : polygon{ {0, 0, 1}, {1, 0, 0}, {0, 1, 0} } {}
+
+__host__ __device__ bool polygon::is_correct()
+{
+    return pl.is_correct();
+}
+
+__host__ __device__ bool polygon::contains(vect3 p)
+{
+    vect3 l1 = (p - p1) ^ (p1 - p2);
+    vect3 l2 = (p - p2) ^ (p2 - p3);
+    vect3 l3 = (p - p3) ^ (p3 - p1);
+
+    float q1 = pl.value(p + l1);
+    float q2 = pl.value(p + l2);
+    float q3 = pl.value(p + l3);
+
+    return (les_equ(q1, 0) && les_equ(q2, 0) && les_equ(q3, 0)) ||
+           (gre_equ(q1, 0) && gre_equ(q2, 0) && gre_equ(q3, 0));
+}
+__host__ __device__ bool polygon::contains(vect3 *p)
+{
+    vect3 l1 = (*p - p1) ^ (p1 - p2);
+    vect3 l2 = (*p - p2) ^ (p2 - p3);
+    vect3 l3 = (*p - p3) ^ (p3 - p1);
+
+    float q1 = pl.value(*p + l1);
+    float q2 = pl.value(*p + l2);
+    float q3 = pl.value(*p + l3);
+
+    return (les_equ(q1, 0) && les_equ(q2, 0) && les_equ(q3, 0)) ||
+           (gre_equ(q1, 0) && gre_equ(q2, 0) && gre_equ(q3, 0));
+}
+__host__ __device__ bool polygon::intersects(line3 l, vect3* p)
+{
+    if (!pl.intersects(l, p))
+        return false;
+    return contains(*p);
+}
+__host__ __device__ bool polygon::posit_intersects(line3 l, vect3* p)
+{
+    if (!pl.posit_intersects(l, p))
+        return false;
+    return contains(*p);
+}
+__host__ __device__ bool polygon::intersects(line3* l, vect3* p)
+{
+    if (!pl.intersects(l, p))
+        return false;
+    return contains(*p);
+}
+__host__ __device__ bool parallelipiped_check(polygon* pol, vect3* p)
+{
+    return (gre_equ(p->x, fmin(pol->p1.x, fmin(pol->p2.x, pol->p3.x))) && les_equ(p->x, fmax(pol->p1.x, fmax(pol->p2.x, pol->p3.x)))) &&
+        (gre_equ(p->y, fmin(pol->p1.y, fmin(pol->p2.y, pol->p3.y))) && les_equ(p->y, fmax(pol->p1.y, fmax(pol->p2.y, pol->p3.y)))) &&
+        (gre_equ(p->z, fmin(pol->p1.z, fmin(pol->p2.z, pol->p3.z))) && les_equ(p->z, fmax(pol->p1.z, fmax(pol->p2.z, pol->p3.z))));
+}
+__host__ __device__ bool polygon::posit_intersects(line3* l, vect3* p)
+{
+    if (!pl.posit_intersects(l, p))
+        return false;
+
+    if (!parallelipiped_check(this, p))
+        return false;
+
+    return contains(p);
+}
+
+__host__ __device__ vect3 polygon::normale()
+{
+    return pl.get_normale();
+}
+
+
+
+__global__ void trace(polygon* pols, unsigned int pol_num, vect3* cam, vect3* O, vect3* x, vect3* y, vect3* light, std::uint8_t* disp, const unsigned int width, const unsigned int height)
+{
+    vect3 inters;
+    float coef = 0;
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int j = blockIdx.y * blockDim.y + threadIdx.y;
+    //unsigned int k = blockIdx.z * blockDim.z + threadIdx.z;
+    float dist = 100000, new_dist = 100000;
+    float h_sc = 1.f / height, w_sc = 1.f / width;
+    vect3 candidate = 0;
+    vect3 light_inters_candidate;
+    line3 lighttocand;
+    vect3 col;
+    int pol_cand_num = -1;
+    bool int_check = false, ch = false;
+    if ((i >= height) || (j >= width))
+        return;
+    
+    line3 ray{ *cam, *O + (*x * (float(j) * h_sc)) + (*y * (float(i) * w_sc)) };
+    for (int k = 0; k < pol_num; k++)
+    {
+        int_check = pols[k].posit_intersects(&ray, &inters);
+        if (int_check)
+        {
+            //new_dist = int_check * (inters - *cam).len + (!int_check) * dist;
+            new_dist = (inters - *cam).len;
+            if (les_equ(new_dist, dist))
+            {
+                //dist = new_dist * (ch)+dist * (!ch);
+                dist = new_dist;
+                //candidate = inters * (ch)+candidate * (!ch);
+                candidate = inters;
+                pol_cand_num = k;
+            }
+        }
+
+    }
+
+    unsigned int coord = (i * width + j) * 4;
+    if (pol_cand_num != -1)
+    {
+        lighttocand = { light, &candidate };
+        pols[pol_cand_num].intersects(&lighttocand, &light_inters_candidate);
+        if (light_inters_candidate == candidate)
+        {
+            auto t1 = ((*light - candidate) * pols[pol_cand_num].normale());
+            auto t2 = (*light - candidate).len;
+            coef = abs(t1 / t2);
+        }
+        col = pols[pol_cand_num].color;
+        disp[coord] = int(coef * col.x);
+        disp[coord + 1] = int(coef * col.y);
+        disp[coord + 2] = int(coef * col.z);
+    }
+    else
+    {
+        disp[coord] = 0;
+        disp[coord + 1] = 0;
+        disp[coord + 2] = 0;
+    }
+}
+
+void p_ray_tracing(polygon* pols, unsigned int pol_num, vect3* cam, vect3* O, vect3* x, vect3* y, vect3* light, std::uint8_t* disp, unsigned int width, unsigned int height)
+{
+    std::uint8_t* disp_dev = 0;
+    polygon* pols_dev = 0;
+    vect3* cam_dev = 0;
+    vect3* O_dev = 0;
+    vect3* x_dev = 0;
+    vect3* y_dev = 0;
+    vect3* light_dev = 0;
+    cudaError_t err;
+    unsigned int N = width * height * 4;
+
+    err = cudaSetDevice(0);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
+    }
+
+    // Allocate GPU buffers for three vectors (two input, one output)    .
+    err = cudaMalloc((void**)&disp_dev, N * sizeof(std::uint8_t));
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc display failed!");
+    }
+
+    err = cudaMalloc((void**)&pols_dev, pol_num * sizeof(polygon));
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc sphere failed!");
+    }
+    err = cudaMalloc((void**)&cam_dev, sizeof(vect3));
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc cam failed!");
+    }
+
+    err = cudaMalloc((void**)&O_dev, sizeof(vect3));
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc O failed!");
+    }
+    err = cudaMalloc((void**)&x_dev, sizeof(vect3));
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc x failed!");
+    }
+    err = cudaMalloc((void**)&y_dev, sizeof(vect3));
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc y failed!");
+    }
+    err = cudaMalloc((void**)&light_dev, sizeof(vect3));
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc light failed!");
+    }
+
+    err = cudaMemcpy(disp_dev, disp, N * sizeof(std::uint8_t), cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy disp failed!");
+    }
+    err = cudaMemcpy(pols_dev, pols, pol_num * sizeof(polygon), cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy sphere failed!");
+    }
+    err = cudaMemcpy(cam_dev, cam, sizeof(vect3), cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) 
+    {
+        fprintf(stderr, "cudaMemcpy cam failed!");
+    }
+    err = cudaMemcpy(O_dev, O, sizeof(vect3), cudaMemcpyHostToDevice);
+    if (err != cudaSuccess)
+    {
+        fprintf(stderr, "cudaMemcpy O failed!");
+    }
+    err = cudaMemcpy(x_dev, x, sizeof(vect3), cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy x failed!");
+    }
+    err = cudaMemcpy(y_dev, y, sizeof(vect3), cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy y failed!");
+    }
+    err = cudaMemcpy(light_dev, light, sizeof(vect3), cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy light failed!");
+    }
+    //printf("-----\n%f %f %f\n%f %f %f\n%f %f %f-----\n", pols_dev[0].p1.x, pols_dev[0].p1.y, pols_dev[0].p1.z, pols_dev[0].p2.x, pols_dev[0].p2.y, pols_dev[0].p3.z, pols_dev[0].p3.x, pols_dev[0].p3.y, pols_dev[0].p3.z);
+
+    const dim3 threadsPerBlock(32, 32);
+    const dim3 numBlocks(width / threadsPerBlock.x, height / threadsPerBlock.y);
+
+    // Prefetch the x and y arrays to the GPU
+    //cudaMemPrefetchAsync(dev_a, size * size * sizeof(float), 0, 0);
+    //cudaMemPrefetchAsync(dev_b, size * size * sizeof(float), 0, 0);
+
+    trace <<<numBlocks, threadsPerBlock >>> (pols_dev, pol_num, cam_dev, O_dev, x_dev, y_dev, light_dev, disp_dev, width, height);
+
+    // Check for any errors launching the kernel
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "tracing launch failed: %s\n", cudaGetErrorString(err));
+    }
+
+    // cudaDeviceSynchronize waits for the kernel to finish, and returns
+    // any errors encountered during the launch.
+    err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", err);
+    }
+
+    // Copy output vector from GPU buffer to host memory.
+    err = cudaMemcpy(disp, disp_dev, N * sizeof(std::uint8_t), cudaMemcpyDeviceToHost);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy final failed!");
+    }
+
+    cudaFree(disp_dev);
+    cudaFree(pols_dev);
+    cudaFree(cam_dev);
+    cudaFree(O_dev);
+    cudaFree(x_dev);
+    cudaFree(y_dev);
+    cudaFree(light_dev);
+}
