@@ -5,7 +5,8 @@
 #include <cmath>
 #include <vector>
 
-const float __constant__ epsilon = 0.0001;
+
+const float __constant__ epsilon = 0.00001;
 
 bool __host__ __device__ equ(float a, float b)
 {
@@ -20,6 +21,10 @@ bool __host__ __device__ gre_equ(float a, float b)
     return (a >= b - epsilon);
 }
 
+int __host__ __device__ sign(float a)
+{
+    return (gre_equ(a, 0) ? 1 : (les_equ(a, 0) ? -1 : 0));
+}
 
 __host__ __device__ vect3::vect3(float x_, float y_, float z_) : x(x_), y(y_), z(z_) 
 {
@@ -385,9 +390,52 @@ __host__ __device__ vect3 polygon::normale()
     return pl.get_normale();
 }
 
+__host__ __device__ vect3 rotation(vect3* p, float OX, float OY, float OZ, vect3 center)
+{
+    float cosa = cos(OX), cosb = cos(OY), cosg = cos(OZ),
+          sina = sin(OX), sinb = sin(OY), sing = sin(OZ);
+
+    float a = p->x - center.x;
+    float b = p->y - center.y;
+    float c = p->z - center.z;
+
+    float x = a * (cosb * cosg) - b * (sing * cosb) + c * (sinb);
+    float y = a * (sina * sinb * cosg + sing * cosa) + b * (-sina * sinb * sing + cosa * cosg) - c * (sina * cosb);
+    float z = a * (sina * sing - sinb * cosa * cosg) + b * (sina * cosg + sinb * sing * cosa) + c * (cosa * cosb);
+
+    return vect3{ x + center.x, y + center.y, z + center.z };
+}
+
+__host__ __device__ polygon rotation(polygon* pol, float OX, float OY, float OZ, vect3 center)
+{
+    vect3 p = rotation(&pol->p1, OX, OY, OZ, center);
+    vect3 q = rotation(&pol->p2, OX, OY, OZ, center);
+    vect3 r = rotation(&pol->p3, OX, OY, OZ, center);
+    return polygon{p, q, r, pol->color};
+
+}
+
+//__host__ __device__ vect3 rotation(vect3 p, vect3 ort, float a)
+//{
+//    float cosa = cos(a), sina = sin(a);
+//
+//    float x = p->x * (cosa + (1 - cosa) * (ort.x*ort.x)) - p->y * ((1 - cosa)*ort.x*ort.y - sina*ort.z) + p->z * ((1-cosa)*ort.x*ort.z + sina*ort.y);
+//    float y = p->x * ((1 - cosa)*ort.y*ort.x + sina*ort.z) + p->y * (cosa + (1 - cosa)*ort.y*ort.y) - p->z * ((1 - cosa)*ort.y*ort.z-sina*ort.x);
+//    float z = p->x * ((1 - cosa)*ort.z*ort.x - sina*ort.y) + p->y * ((1 - cosa)*ort.z*ort.y+sina*ort.x) + p->z * (cosa + (1 - cosa)*ort.z*ort.z);
+//
+//    return vect3{ x, y, z };
+//}
+//
+//__host__ __device__ polygon rotation(polygon* pol, vect3 ort, float a)
+//{
+//    vect3 p = rotation(pol->p1, ort, a);
+//    vect3 q = rotation(pol->p2, ort, a);
+//    vect3 r = rotation(pol->p3, ort, a);
+//    return polygon{ p, q, r, pol->color };
+//}
 
 
-__global__ void trace(polygon* pols, unsigned int pol_num, vect3* cam, vect3* O, vect3* x, vect3* y, vect3* light, std::uint8_t* disp, const unsigned int width, const unsigned int height)
+__global__ void trace(polygon* pols, unsigned int pol_num, vect3* cam, vect3* O, vect3* x, vect3* y, vect3* lights, unsigned int lights_num, std::uint8_t* disp, const unsigned int width, const unsigned int height)
 {
     vect3 inters;
     float coef = 0;
@@ -402,6 +450,7 @@ __global__ void trace(polygon* pols, unsigned int pol_num, vect3* cam, vect3* O,
     vect3 col;
     int pol_cand_num = -1;
     bool int_check = false, ch = false;
+
     if ((i >= height) || (j >= width))
         return;
     
@@ -424,18 +473,24 @@ __global__ void trace(polygon* pols, unsigned int pol_num, vect3* cam, vect3* O,
         }
 
     }
-
+    float coef_temp = 0;
     unsigned int coord = (i * width + j) * 4;
     if (pol_cand_num != -1)
     {
-        lighttocand = { light, &candidate };
-        pols[pol_cand_num].intersects(&lighttocand, &light_inters_candidate);
-        if (light_inters_candidate == candidate)
+        for (int l = 0; l < lights_num; l++)
         {
-            auto t1 = ((*light - candidate) * pols[pol_cand_num].normale());
-            auto t2 = (*light - candidate).len;
-            coef = abs(t1 / t2);
+            lighttocand = { &lights[l], &candidate};
+            pols[pol_cand_num].intersects(&lighttocand, &light_inters_candidate);
+            if (light_inters_candidate == candidate)
+            {
+                auto t1 = ((lights[l] - candidate) * pols[pol_cand_num].normale());
+                auto t2 = (lights[l] - candidate).len;
+                coef_temp = abs(t1 / t2) * (sign(pols[pol_cand_num].pl.value(cam)) == sign(pols[pol_cand_num].pl.value(lights[l])));
+                if (coef_temp > coef)
+                    coef = coef_temp;
+            }
         }
+        //coef /= lights_num;
         col = pols[pol_cand_num].color;
         disp[coord] = int(coef * col.x);
         disp[coord + 1] = int(coef * col.y);
@@ -443,13 +498,14 @@ __global__ void trace(polygon* pols, unsigned int pol_num, vect3* cam, vect3* O,
     }
     else
     {
+
         disp[coord] = 0;
         disp[coord + 1] = 0;
         disp[coord + 2] = 0;
     }
 }
 
-void p_ray_tracing(polygon* pols, unsigned int pol_num, vect3* cam, vect3* O, vect3* x, vect3* y, vect3* light, std::uint8_t* disp, unsigned int width, unsigned int height)
+void p_ray_tracing(polygon* pols, unsigned int pol_num, vect3* cam, vect3* O, vect3* x, vect3* y, vect3* lights, unsigned int lights_num, std::uint8_t* disp, unsigned int width, unsigned int height)
 {
     std::uint8_t* disp_dev = 0;
     polygon* pols_dev = 0;
@@ -493,7 +549,7 @@ void p_ray_tracing(polygon* pols, unsigned int pol_num, vect3* cam, vect3* O, ve
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaMalloc y failed!");
     }
-    err = cudaMalloc((void**)&light_dev, sizeof(vect3));
+    err = cudaMalloc((void**)&light_dev, lights_num * sizeof(vect3));
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaMalloc light failed!");
     }
@@ -524,20 +580,20 @@ void p_ray_tracing(polygon* pols, unsigned int pol_num, vect3* cam, vect3* O, ve
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaMemcpy y failed!");
     }
-    err = cudaMemcpy(light_dev, light, sizeof(vect3), cudaMemcpyHostToDevice);
+    err = cudaMemcpy(light_dev, lights, lights_num * sizeof(vect3), cudaMemcpyHostToDevice);
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaMemcpy light failed!");
     }
     //printf("-----\n%f %f %f\n%f %f %f\n%f %f %f-----\n", pols_dev[0].p1.x, pols_dev[0].p1.y, pols_dev[0].p1.z, pols_dev[0].p2.x, pols_dev[0].p2.y, pols_dev[0].p3.z, pols_dev[0].p3.x, pols_dev[0].p3.y, pols_dev[0].p3.z);
 
     const dim3 threadsPerBlock(32, 32);
-    const dim3 numBlocks(width / threadsPerBlock.x, height / threadsPerBlock.y);
+    const dim3 numBlocks(ceil(width / threadsPerBlock.x) + 1, ceil(height / threadsPerBlock.y) + 1);
 
     // Prefetch the x and y arrays to the GPU
     //cudaMemPrefetchAsync(dev_a, size * size * sizeof(float), 0, 0);
     //cudaMemPrefetchAsync(dev_b, size * size * sizeof(float), 0, 0);
 
-    trace <<<numBlocks, threadsPerBlock >>> (pols_dev, pol_num, cam_dev, O_dev, x_dev, y_dev, light_dev, disp_dev, width, height);
+    trace <<<numBlocks, threadsPerBlock >>> (pols_dev, pol_num, cam_dev, O_dev, x_dev, y_dev, light_dev,lights_num, disp_dev, width, height);
 
     // Check for any errors launching the kernel
     err = cudaGetLastError();

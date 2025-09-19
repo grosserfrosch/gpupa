@@ -2,6 +2,7 @@
 #include "device_launch_parameters.h"
 #include <stdio.h>
 
+
 __host__ __device__ bool equ(float a, float b);
 
 __host__ __device__ bool les_equ(float a, float b);
@@ -100,4 +101,10 @@ struct polygon
 	__host__ __device__ vect3 normale();
 };
 
-void p_ray_tracing(polygon* sph, unsigned int pol_num, vect3* cam, vect3* O, vect3* x, vect3* y, vect3* light, std::uint8_t *disp, const unsigned int width, const unsigned int height);
+__host__ __device__ vect3 rotation(vect3* p, float OX, float OY, float OZ, vect3 center = {0, 0, 0});
+
+__host__ __device__ polygon rotation(polygon* pol, float OX, float OY, float OZ, vect3 center = {0, 0, 0});
+
+//__host__ __device__ polygon rotation(polygon* pol, vect3 ort);
+
+void p_ray_tracing(polygon* sph, unsigned int pol_num, vect3* cam, vect3* O, vect3* x, vect3* y, vect3* lights, unsigned int lights_num, std::uint8_t *disp, const unsigned int width, const unsigned int height);
