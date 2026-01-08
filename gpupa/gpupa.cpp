@@ -82,10 +82,6 @@ int main()
     sf::RenderWindow window(sf::VideoMode({ width, height }), "Boris", sf::Style::Titlebar);
     window.setFramerateLimit(30);
     float pi = 3.1416;
-    vect3 q{ 1, 1, 0 };
-    std::cout << q.x << ' ' << q.y << ' ' << q.z << '\n';
-    q = rotation(&q, pi, 0, 0);
-    std::cout << q.x << ' ' << q.y << ' ' << q.z << '\n';
 
     vect3 cam{ 0, 0, 0 };
     float dist = 0.5;
@@ -98,65 +94,42 @@ int main()
     vect3 H{ disp_center + vect3{ -disp_w / 2, 0, -disp_h / 2}};
     vect3 x{ W - O }, y{ H - O };
     //now OH and OW -- basis vectors
-    std::cout << x.x << ' ' << x.y << ' ' << x.z << '\n';
-    std::cout << y.x << ' ' << y.y << ' ' << y.z << '\n';
-    std::cout << O.x << ' ' << O.y << ' ' << O.z << '\n';
-    std::cout << disp_plane.A << ' ' << disp_plane.B << ' ' << disp_plane.C << ' ' << disp_plane.D << '\n';
-    std::cout << x.len << ' ' << y.len << '\n';
-    sphere tit1{ {-2, 5, 0}, 2, {252, 180, 121} };
-    sphere tit2{ {2, 5, 0}, 2, {252, 180, 121} };
-    sphere nip1{ {2, 3.3, 0}, 0.5, {245, 71, 100} };
-    sphere nip2{ {-2, 3.3, 0}, 0.5, {245, 71, 100} };
 
-    //polygon pol1{ {-5, 5, 0}, {-2.5, 5, 5}, {0, 5 ,0}, {255, 0, 0} };
-    /*polygon pol2{ {-2.5, 5, 5}, {0, 5, 0}, {2.5, 5 ,5}, {0, 0, 255} };
-    polygon pol3{ {0, 5, 0}, {2.5, 5, 5}, {5, 5 ,0}, {0, 255, 0} };
-    polygon pol4{ {-5, 5, 0}, {0, 5, -5}, {5, 5 ,0}, {255, 255, 255} };
-    polygon pol5{ {0, 5, 0}, {2.5, 5, 5}, {5, 5 ,0}, {0, 255, 0} };
-    polygon pol6{ {-5, 5, 0}, {0, 5, -5}, {5, 5 ,0}, {255, 255, 255} };
-    polygon pol7{ {-5, 5, 0}, {-2.5, 5, 5}, {0, 5 ,0}, {255, 0, 0} };
-    polygon pol8{ {-2.5, 5, 5}, {0, 5, 0}, {2.5, 5 ,5}, {0, 0, 255} };
-    polygon pol9{ {0, 5, 0}, {2.5, 5, 5}, {5, 5 ,0}, {0, 255, 0} };
-    polygon pol10{ {-5, 5, 0}, {0, 5, -5}, {5, 5 ,0}, {255, 255, 255} };
-    polygon pol11{ {0, 5, 0}, {2.5, 5, 5}, {5, 5 ,0}, {0, 255, 0} };
-    polygon pol12{ {-5, 5, 0}, {0, 5, -5}, {5, 5 ,0}, {255, 255, 255} };*/
     unsigned int n = 4;
-    sphere* sphs = new sphere[n]{ tit1, tit2, nip1, nip2 };
     
-    //polygon* pols = new polygon[k]{ pol2, pol1, pol3, pol4, pol5, pol6, pol7, pol8, pol9, pol10, pol11, pol12 };
     vect3 p;
     parallelepiped par{ {0, 5, 0}, 2, 2, 2, {255, 0, 0} };
-    icosahedron ico{ {0, 5, 0}, 2, {255, 255, 0} };
+    icosahedron ico{ {0, 5, 0}, 2, {255, 0, 0} };
     polygon* pols = ico.pols;
     unsigned int k = ico.edges;
-    //std::cout << pol1.intersects(line3{ {0, 0, 0}, O + y*(1/2)}, &p) << std::endl;
     std::cout << p.x << ' ' << p.y << ' ' << p.z << '\n';
-    //test(pols);
-    //std::cout << pols[0].color.x << std::endl;
+
     std::vector<std::uint8_t> pixelBuffer(width * height * 4);
     std::uint8_t *buffer = new std::uint8_t[width * height * 4];
     sf::Texture texture{ sf::Vector2u{width, height} };
 
     sf::Sprite sprite{texture};
     //vect3 ort = norm(vect3{-2.5, });
-    for (int i = 0; i < width * height * 4; i+= 4)
-    {
-        int j = i / 4;
-        int y = j % width;
-        int x = j / width;
-        pixelBuffer[i + 3] = 255;
-
-        pixelBuffer[i] = int(sqrt(x*x + y*y)) % 256;
-        pixelBuffer[i + 1] = 0;
-        pixelBuffer[i + 2] = 0;
-
-        
-        //std::cout << i << std::endl;
-    }
+    
     sf::ContextSettings settings = window.getSettings();
     unsigned int lights_num = 3;
     vect3* light_spots = new vect3[lights_num]{ vect3{0, 4, 5}, vect3{5, 0, 0}, vect3{-5, 5, 0} };
     float t = 0;
+
+    Info inf = {};
+    inf.lights_num = lights_num;
+    inf.cam = &cam;
+    inf.disp = buffer;
+    inf.height = height;
+    inf.width = width;
+    inf.light = light_spots;
+    inf.O = &O;
+    inf.x = &x;
+    inf.y = &y;
+    inf.pols = pols;
+    inf.pol_num = k;
+    Info dev = gpu_init(inf);
+
     while (window.isOpen())
     {
         while (const std::optional event = window.pollEvent())
@@ -171,10 +144,12 @@ int main()
         //ray_tracing(sph, cam, O, x, y, pixelBuffer, width, height);
         for (int i = 0; i < k; i++)
             pols[i] = rotation(&pols[i], pi / 300, pi / 400, pi / 100, ico.center);
-        p_ray_tracing(pols, k, &cam, &O, &x, &y, light_spots, lights_num, buffer, width, height);
+        inf.pols = pols;
+        p_ray_tracing(inf, dev);
+        //p_ray_tracing(pols, k, &cam, &O, &x, &y, light_spots, lights_num, buffer, width, height);
         //lin_trace(pols, k, &cam, &O, &x, &y, &light_spot, buffer, width, height);
         clock_t end = clock();
-        //std::cout << float(end - begin) / CLOCKS_PER_SEC << std::endl;
+        std::cout << float(end - begin) / CLOCKS_PER_SEC << std::endl;
         //std::cout << light_spot.x << ' ' << light_spot.y << ' ' << light_spot.z << '\n';
         window.clear();
         texture.update(buffer);
@@ -182,6 +157,6 @@ int main()
         window.draw(sprite);
         window.display();
     }
-
-    delete[] sphs;
+    gpu_free(dev);
+    //delete[] sphs;
 }

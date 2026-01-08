@@ -383,6 +383,43 @@ __host__ __device__ bool polygon::posit_intersects(line3* l, vect3* p)
         return false;
 
     return contains(p);
+
+}
+
+__host__ __device__ inline float polygon::MT_inters(line3* l, vect3* p)
+{
+    vect3 dir = l->p2 - l->p1;
+    vect3 e1 = p2 - p1;
+    vect3 e2 = p3 - p1;
+    vect3 ray_cross_e2 = dir ^ e2;
+
+    float det = e1 * ray_cross_e2;
+    if (equ(det, 0.0))
+        return -1.f; 
+
+    float inv_det = 1.0 / det;
+    vect3 s = l->p1 - p1;
+    float u = inv_det * (s * ray_cross_e2);
+
+    if ((u < 0 && abs(u) > epsilon) || (u > 1 && abs(u - 1) > epsilon))
+        return -1.f;
+
+    vect3 s_cross_e1 = s ^ e1;
+    float v = inv_det * (dir * s_cross_e1);
+
+    if ((v < 0 && abs(v) > epsilon) || (u + v > 1 && abs(u + v - 1) > epsilon))
+        return -1.f;
+
+    float t = inv_det * (e2 * s_cross_e1);
+
+    if (t > epsilon) 
+    {
+        *p = vect3{ l->p1 + dir * t };
+        return t;
+    }
+    else 
+        return -1.f;
+
 }
 
 __host__ __device__ vect3 polygon::normale()
@@ -435,7 +472,8 @@ __host__ __device__ polygon rotation(polygon* pol, float OX, float OY, float OZ,
 //}
 
 
-__global__ void trace(polygon* pols, unsigned int pol_num, vect3* cam, vect3* O, vect3* x, vect3* y, vect3* lights, unsigned int lights_num, std::uint8_t* disp, const unsigned int width, const unsigned int height)
+__global__ void trace(polygon* pols, unsigned int pol_num, vect3* cam, vect3* O, vect3* x, vect3* y, vect3* lights,
+                      unsigned int lights_num, std::uint8_t* disp, const unsigned int width, const unsigned int height)
 {
     vect3 inters;
     float coef = 0;
@@ -457,24 +495,28 @@ __global__ void trace(polygon* pols, unsigned int pol_num, vect3* cam, vect3* O,
     line3 ray{ *cam, *O + (*x * (float(j) * h_sc)) + (*y * (float(i) * w_sc)) };
     for (int k = 0; k < pol_num; k++)
     {
-        int_check = pols[k].posit_intersects(&ray, &inters);
-        if (int_check)
+        new_dist = pols[k].MT_inters(&ray, &inters);
+
+        //new_dist = 10;
+        //int_check = true;
+        if (les_equ(new_dist, dist) && new_dist > epsilon)
         {
             //new_dist = int_check * (inters - *cam).len + (!int_check) * dist;
-            new_dist = (inters - *cam).len;
-            if (les_equ(new_dist, dist))
-            {
+            //new_dist = (inters - *cam).len;
+            //if (les_equ(new_dist, dist))
+            //{
                 //dist = new_dist * (ch)+dist * (!ch);
                 dist = new_dist;
                 //candidate = inters * (ch)+candidate * (!ch);
                 candidate = inters;
                 pol_cand_num = k;
-            }
+            //}
         }
 
     }
     float coef_temp = 0;
     unsigned int coord = (i * width + j) * 4;
+
     if (pol_cand_num != -1)
     {
         for (int l = 0; l < lights_num; l++)
@@ -490,6 +532,7 @@ __global__ void trace(polygon* pols, unsigned int pol_num, vect3* cam, vect3* O,
                     coef = coef_temp;
             }
         }
+        
         //coef /= lights_num;
         col = pols[pol_cand_num].color;
         disp[coord] = int(coef * col.x);
@@ -498,102 +541,133 @@ __global__ void trace(polygon* pols, unsigned int pol_num, vect3* cam, vect3* O,
     }
     else
     {
-
         disp[coord] = 0;
         disp[coord + 1] = 0;
         disp[coord + 2] = 0;
     }
 }
 
-void p_ray_tracing(polygon* pols, unsigned int pol_num, vect3* cam, vect3* O, vect3* x, vect3* y, vect3* lights, unsigned int lights_num, std::uint8_t* disp, unsigned int width, unsigned int height)
+Info gpu_init(Info inf)
 {
-    std::uint8_t* disp_dev = 0;
-    polygon* pols_dev = 0;
-    vect3* cam_dev = 0;
-    vect3* O_dev = 0;
-    vect3* x_dev = 0;
-    vect3* y_dev = 0;
-    vect3* light_dev = 0;
+    //std::uint8_t* disp_dev = 0;
+    //polygon* pols_dev = 0;
+    //vect3* cam_dev = 0;
+    //vect3* O_dev = 0;
+    //vect3* x_dev = 0;
+    //vect3* y_dev = 0;
+    //vect3* light_dev = 0;
+    Info dev = {};
+    //dev.disp = 0;
+    //dev.pols = 0;
+    //dev.cam = 0;
+    //dev.O = 0;
+    //dev.x = 0;
+    //dev.y = 0;
+    //dev.light = 0;
+    dev.lights_num = inf.lights_num;
+    dev.pol_num = inf.pol_num;
+    dev.width = inf.width;
+    dev.height = inf.height;
     cudaError_t err;
-    unsigned int N = width * height * 4;
+    unsigned int N = inf.width * inf.height * 4;
 
     err = cudaSetDevice(0);
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
     }
-
-    // Allocate GPU buffers for three vectors (two input, one output)    .
-    err = cudaMalloc((void**)&disp_dev, N * sizeof(std::uint8_t));
+  
+    err = cudaMalloc((void**)&dev.disp, N * sizeof(std::uint8_t));
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaMalloc display failed!");
     }
 
-    err = cudaMalloc((void**)&pols_dev, pol_num * sizeof(polygon));
+    err = cudaMalloc((void**)&dev.pols, dev.pol_num * sizeof(polygon));
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaMalloc sphere failed!");
     }
-    err = cudaMalloc((void**)&cam_dev, sizeof(vect3));
+    err = cudaMalloc((void**)&dev.cam, sizeof(vect3));
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaMalloc cam failed!");
     }
-
-    err = cudaMalloc((void**)&O_dev, sizeof(vect3));
+    err = cudaMalloc((void**)&dev.O, sizeof(vect3));
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaMalloc O failed!");
     }
-    err = cudaMalloc((void**)&x_dev, sizeof(vect3));
+    err = cudaMalloc((void**)&dev.x, sizeof(vect3));
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaMalloc x failed!");
     }
-    err = cudaMalloc((void**)&y_dev, sizeof(vect3));
+    err = cudaMalloc((void**)&dev.y, sizeof(vect3));
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaMalloc y failed!");
     }
-    err = cudaMalloc((void**)&light_dev, lights_num * sizeof(vect3));
+    err = cudaMalloc((void**)&dev.light, dev.lights_num * sizeof(vect3));
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaMalloc light failed!");
     }
+    return dev;
+}
 
-    err = cudaMemcpy(disp_dev, disp, N * sizeof(std::uint8_t), cudaMemcpyHostToDevice);
+void gpu_free(Info dev)
+{
+    cudaFree(dev.disp);
+    cudaFree(dev.pols);
+    cudaFree(dev.cam);
+    cudaFree(dev.O);
+    cudaFree(dev.x);
+    cudaFree(dev.y);
+    cudaFree(dev.light);
+}
+
+void p_ray_tracing(Info inf, Info dev)
+{
+    cudaError_t err;
+    unsigned int N = inf.width * inf.height * 4;
+
+    err = cudaSetDevice(0);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
+    }
+    err = cudaMemcpy(dev.disp, inf.disp, N * sizeof(std::uint8_t), cudaMemcpyHostToDevice);
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaMemcpy disp failed!");
     }
-    err = cudaMemcpy(pols_dev, pols, pol_num * sizeof(polygon), cudaMemcpyHostToDevice);
+    err = cudaMemcpy(dev.pols, inf.pols, inf.pol_num * sizeof(polygon), cudaMemcpyHostToDevice);
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaMemcpy sphere failed!");
     }
-    err = cudaMemcpy(cam_dev, cam, sizeof(vect3), cudaMemcpyHostToDevice);
+    err = cudaMemcpy(dev.cam, inf.cam, sizeof(vect3), cudaMemcpyHostToDevice);
     if (err != cudaSuccess) 
     {
         fprintf(stderr, "cudaMemcpy cam failed!");
     }
-    err = cudaMemcpy(O_dev, O, sizeof(vect3), cudaMemcpyHostToDevice);
+    err = cudaMemcpy(dev.O, inf.O, sizeof(vect3), cudaMemcpyHostToDevice);
     if (err != cudaSuccess)
     {
         fprintf(stderr, "cudaMemcpy O failed!");
     }
-    err = cudaMemcpy(x_dev, x, sizeof(vect3), cudaMemcpyHostToDevice);
+    err = cudaMemcpy(dev.x, inf.x, sizeof(vect3), cudaMemcpyHostToDevice);
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaMemcpy x failed!");
     }
-    err = cudaMemcpy(y_dev, y, sizeof(vect3), cudaMemcpyHostToDevice);
+    err = cudaMemcpy(dev.y, inf.y, sizeof(vect3), cudaMemcpyHostToDevice);
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaMemcpy y failed!");
     }
-    err = cudaMemcpy(light_dev, lights, lights_num * sizeof(vect3), cudaMemcpyHostToDevice);
+    err = cudaMemcpy(dev.light, inf.light, inf.lights_num * sizeof(vect3), cudaMemcpyHostToDevice);
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaMemcpy light failed!");
     }
     //printf("-----\n%f %f %f\n%f %f %f\n%f %f %f-----\n", pols_dev[0].p1.x, pols_dev[0].p1.y, pols_dev[0].p1.z, pols_dev[0].p2.x, pols_dev[0].p2.y, pols_dev[0].p3.z, pols_dev[0].p3.x, pols_dev[0].p3.y, pols_dev[0].p3.z);
 
-    const dim3 threadsPerBlock(32, 32);
-    const dim3 numBlocks(ceil(width / threadsPerBlock.x) + 1, ceil(height / threadsPerBlock.y) + 1);
+    const dim3 threadsPerBlock(16, 16);
+    const dim3 numBlocks(ceil(inf.width / threadsPerBlock.x) + 1, ceil(inf.height / threadsPerBlock.y) + 1);
 
     // Prefetch the x and y arrays to the GPU
     //cudaMemPrefetchAsync(dev_a, size * size * sizeof(float), 0, 0);
     //cudaMemPrefetchAsync(dev_b, size * size * sizeof(float), 0, 0);
 
-    trace <<<numBlocks, threadsPerBlock >>> (pols_dev, pol_num, cam_dev, O_dev, x_dev, y_dev, light_dev,lights_num, disp_dev, width, height);
+    trace <<<numBlocks, threadsPerBlock >>> (dev.pols, dev.pol_num, dev.cam, dev.O, dev.x, dev.y, dev.light, dev.lights_num, dev.disp, dev.width, dev.height);
 
     // Check for any errors launching the kernel
     err = cudaGetLastError();
@@ -609,16 +683,8 @@ void p_ray_tracing(polygon* pols, unsigned int pol_num, vect3* cam, vect3* O, ve
     }
 
     // Copy output vector from GPU buffer to host memory.
-    err = cudaMemcpy(disp, disp_dev, N * sizeof(std::uint8_t), cudaMemcpyDeviceToHost);
+    err = cudaMemcpy(inf.disp, dev.disp, N * sizeof(std::uint8_t), cudaMemcpyDeviceToHost);
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaMemcpy final failed!");
     }
-
-    cudaFree(disp_dev);
-    cudaFree(pols_dev);
-    cudaFree(cam_dev);
-    cudaFree(O_dev);
-    cudaFree(x_dev);
-    cudaFree(y_dev);
-    cudaFree(light_dev);
 }

@@ -97,6 +97,7 @@ struct polygon
 	__host__ __device__ bool posit_intersects(line3 l, vect3* p);
 	__host__ __device__ bool intersects(line3 *l, vect3* p);
 	__host__ __device__ bool posit_intersects(line3 *l, vect3* p);
+	__host__ __device__ float polygon::MT_inters(line3* l, vect3* p);
 
 	__host__ __device__ vect3 normale();
 };
@@ -107,4 +108,20 @@ __host__ __device__ polygon rotation(polygon* pol, float OX, float OY, float OZ,
 
 //__host__ __device__ polygon rotation(polygon* pol, vect3 ort);
 
-void p_ray_tracing(polygon* sph, unsigned int pol_num, vect3* cam, vect3* O, vect3* x, vect3* y, vect3* lights, unsigned int lights_num, std::uint8_t *disp, const unsigned int width, const unsigned int height);
+struct Info
+{
+	polygon* pols;
+	unsigned int pol_num;
+	vect3* cam;
+	vect3* O;
+	vect3* x;
+	vect3* y;
+	vect3* light;
+	unsigned int lights_num;
+	std::uint8_t* disp;
+	unsigned int width;
+	unsigned int height;
+};
+Info gpu_init(Info inf);
+void gpu_free(Info dev);
+void p_ray_tracing(Info copy, Info dev);
