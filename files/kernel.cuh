@@ -1,7 +1,7 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 #include <stdio.h>
-
+#include <cstdint>
 
 __host__ __device__ bool equ(float a, float b);
 
@@ -97,7 +97,7 @@ struct polygon
 	__host__ __device__ bool posit_intersects(line3 l, vect3* p);
 	__host__ __device__ bool intersects(line3 *l, vect3* p);
 	__host__ __device__ bool posit_intersects(line3 *l, vect3* p);
-	__host__ __device__ float polygon::MT_inters(line3* l, vect3* p);
+	__host__ __device__ float MT_inters(line3* l, vect3* p);
 
 	__host__ __device__ vect3 normale();
 };
@@ -118,7 +118,7 @@ struct Info
 	vect3* y;
 	vect3* light;
 	unsigned int lights_num;
-	std::uint8_t* disp;
+	uint8_t* disp;
 	unsigned int width;
 	unsigned int height;
 };

@@ -4,7 +4,7 @@
 #include "kernel.cuh"
 #include <cmath>
 #include <vector>
-
+#include <cstdint>
 
 const float __constant__ epsilon = 0.00001;
 
@@ -473,7 +473,7 @@ __host__ __device__ polygon rotation(polygon* pol, float OX, float OY, float OZ,
 
 
 __global__ void trace(polygon* pols, unsigned int pol_num, vect3* cam, vect3* O, vect3* x, vect3* y, vect3* lights,
-                      unsigned int lights_num, std::uint8_t* disp, const unsigned int width, const unsigned int height)
+                      unsigned int lights_num, uint8_t* disp, const unsigned int width, const unsigned int height)
 {
     vect3 inters;
     float coef = 0;
@@ -491,7 +491,6 @@ __global__ void trace(polygon* pols, unsigned int pol_num, vect3* cam, vect3* O,
 
     if ((i >= height) || (j >= width))
         return;
-    
     line3 ray{ *cam, *O + (*x * (float(j) * h_sc)) + (*y * (float(i) * w_sc)) };
     for (int k = 0; k < pol_num; k++)
     {
@@ -570,13 +569,12 @@ Info gpu_init(Info inf)
     dev.height = inf.height;
     cudaError_t err;
     unsigned int N = inf.width * inf.height * 4;
-
     err = cudaSetDevice(0);
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
     }
   
-    err = cudaMalloc((void**)&dev.disp, N * sizeof(std::uint8_t));
+    err = cudaMalloc((void**)&dev.disp, N * sizeof(uint8_t));
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaMalloc display failed!");
     }
@@ -628,7 +626,7 @@ void p_ray_tracing(Info inf, Info dev)
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
     }
-    err = cudaMemcpy(dev.disp, inf.disp, N * sizeof(std::uint8_t), cudaMemcpyHostToDevice);
+    err = cudaMemcpy(dev.disp, inf.disp, N * sizeof(uint8_t), cudaMemcpyHostToDevice);
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaMemcpy disp failed!");
     }
@@ -681,10 +679,12 @@ void p_ray_tracing(Info inf, Info dev)
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", err);
     }
-
     // Copy output vector from GPU buffer to host memory.
-    err = cudaMemcpy(inf.disp, dev.disp, N * sizeof(std::uint8_t), cudaMemcpyDeviceToHost);
+    err = cudaMemcpy(inf.disp, dev.disp, N * sizeof(uint8_t), cudaMemcpyDeviceToHost);
     if (err != cudaSuccess) {
         fprintf(stderr, "cudaMemcpy final failed!");
     }
+    //for (int i = 0; i < N; i++)
+    //        inf.disp[i] = 255;
+    //printf("%u\n", inf.disp[409216]);
 }

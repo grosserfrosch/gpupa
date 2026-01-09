@@ -1,0 +1,5 @@
+#!/bin/bash
+
+g++ -O2 -g -c gpupa.cpp
+nvcc -g -O2 -c kernel.cu shapes.cu
+g++ -g -o prog gpupa.o kernel.o shapes.o -L/usr/local/cuda/lib -lcudart -lsfml-graphics -lsfml-window -lsfml-system
